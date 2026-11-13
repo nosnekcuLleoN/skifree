@@ -1,0 +1,1488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkiFree</title>
+<style>
+  :root{
+    --face:#c0c0c0;
+    --light:#ffffff;
+    --shadow:#404040;
+    --mid:#808080;
+    --navy:#000080;
+    --snow:#ffffff;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    background:#008080;
+    font-family:"MS Sans Serif", Tahoma, "Courier New", monospace;
+    font-size:12px;
+    color:#000;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    min-height:100vh;
+    overflow:auto;
+  }
+  .win{
+    background:var(--face);
+    border:2px solid;
+    border-color:var(--light) var(--shadow) var(--shadow) var(--light);
+    padding:2px;
+    max-width:calc(100vw - 8px);
+  }
+  .titlebar{
+    height:22px;
+    background:var(--navy);
+    color:#fff;
+    display:flex;
+    align-items:center;
+    padding:0 2px 0 3px;
+    font-weight:bold;
+    font-size:12px;
+    user-select:none;
+  }
+  #icon{ width:16px; height:16px; margin-right:4px; display:block; }
+  .title{ letter-spacing:0; }
+  .spacer{ flex:1; }
+  .tbtn{
+    width:16px; height:14px;
+    margin-left:2px;
+    padding:0;
+    background:var(--face);
+    color:#000;
+    border:1px solid;
+    border-color:var(--light) var(--shadow) var(--shadow) var(--light);
+    font-family:"MS Sans Serif", Tahoma, "Courier New", monospace;
+    font-size:9px;
+    font-weight:bold;
+    line-height:11px;
+    text-align:center;
+    cursor:pointer;
+  }
+  .tbtn:active{ border-color:var(--shadow) var(--light) var(--light) var(--shadow); }
+  .tbtn.wide{ width:auto; height:16px; padding:0 6px; font-size:11px; }
+  .menubar{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    padding:2px 6px;
+    background:var(--face);
+    border-bottom:1px solid var(--mid);
+    user-select:none;
+  }
+  .menubar span{ cursor:default; }
+  .canvas-wrap{
+    border:2px solid;
+    border-color:var(--mid) var(--light) var(--light) var(--mid);
+    background:#fff;
+    line-height:0;
+    margin-top:2px;
+  }
+  #game{
+    display:block;
+    image-rendering:pixelated;
+    image-rendering:crisp-edges;
+    background:#fff;
+    width:640px;
+    height:480px;
+    outline:none;
+    touch-action:none;
+  }
+  .statusbar{
+    display:flex;
+    gap:2px;
+    margin-top:2px;
+  }
+  .status{
+    border:1px solid;
+    border-color:var(--mid) var(--light) var(--light) var(--mid);
+    padding:2px 6px;
+    font-size:11px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .status.grow{ flex:1; min-width:0; }
+  .win.collapsed .menubar,
+  .win.collapsed .canvas-wrap,
+  .win.collapsed .statusbar{ display:none; }
+  @media (max-width:700px){
+    #game{ width:100%; height:auto; }
+    .menubar{ gap:8px; font-size:11px; }
+  }
+</style>
+</head>
+<body>
+<div class="win" id="win">
+  <div class="titlebar">
+    <canvas id="icon" width="16" height="16"></canvas>
+    <span class="title">SkiFree</span>
+    <span class="spacer"></span>
+    <button class="tbtn" id="btnMin" title="Minimize (decorative)">_</button>
+    <button class="tbtn" id="btnMax" title="Maximize (decorative)">&#9633;</button>
+    <button class="tbtn" id="btnClose" title="Close (decorative)">&#215;</button>
+  </div>
+  <div class="menubar">
+    <span>File</span><span>Game</span><span>Options</span><span>Help</span>
+    <span class="spacer"></span>
+    <button class="tbtn wide" id="btnMute" title="Mute sound (M)">SND: ON</button>
+  </div>
+  <div class="canvas-wrap">
+    <canvas id="game" width="640" height="480" tabindex="0" aria-label="SkiFree game canvas. Arrow keys or WASD to ski, F to boost, Space to jump, F2 to restart."></canvas>
+  </div>
+  <div class="statusbar">
+    <div class="status grow" id="statusMsg">Made by Synapsespiral | Copyright 2026 Synapse</div>
+    <div class="status" id="statusHint">F2 = RESTART</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function () {
+  /* ============================================================
+     SkiFree — single-file recreation. No external assets.
+     ============================================================ */
+
+  const W = 640, H = 480;
+  const PLAYER_Y = 190;          // fixed screen row of the skier
+  const PX_PER_M = 16;           // world pixels per metre
+  const STEP = 1 / 120;          // fixed physics step
+  const START_Y = 190;           // starting world position
+  const YETI_AT = 500;           // metres (demo pacing)
+
+  const cv = document.getElementById("game");
+  const ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+
+  /* ---------- palette ---------- */
+  const C = {
+    K: "#000000", S: "#f2c48d", Y: "#ffd800", R: "#c81e1e",
+    B: "#1e3fa0", G: "#8a8a8a", D: "#5a5a5a", W: "#ffffff",
+    N: "#006400", L: "#00a000", T: "#7a4a20", E: "#d8d8d8",
+    X: "#ff0000", C: "#00c8c8", O: "#ff8000", P: "#8000c0",
+    M: "#00a000"
+  };
+
+  /* ---------- 5x7 pixel font ---------- */
+  const FONT = {
+    A:"01110,10001,10001,11111,10001,10001,10001",
+    B:"11110,10001,10001,11110,10001,10001,11110",
+    C:"01110,10001,10000,10000,10000,10001,01110",
+    D:"11110,10001,10001,10001,10001,10001,11110",
+    E:"11111,10000,10000,11110,10000,10000,11111",
+    F:"11111,10000,10000,11110,10000,10000,10000",
+    G:"01110,10001,10000,10111,10001,10001,01111",
+    H:"10001,10001,10001,11111,10001,10001,10001",
+    I:"11111,00100,00100,00100,00100,00100,11111",
+    J:"00111,00010,00010,00010,00010,10010,01100",
+    K:"10001,10010,10100,11000,10100,10010,10001",
+    L:"10000,10000,10000,10000,10000,10000,11111",
+    M:"10001,11011,10101,10101,10001,10001,10001",
+    N:"10001,11001,10101,10011,10001,10001,10001",
+    O:"01110,10001,10001,10001,10001,10001,01110",
+    P:"11110,10001,10001,11110,10000,10000,10000",
+    Q:"01110,10001,10001,10001,10101,10010,01101",
+    R:"11110,10001,10001,11110,10100,10010,10001",
+    S:"01111,10000,10000,01110,00001,00001,11110",
+    T:"11111,00100,00100,00100,00100,00100,00100",
+    U:"10001,10001,10001,10001,10001,10001,01110",
+    V:"10001,10001,10001,10001,10001,01010,00100",
+    W:"10001,10001,10001,10101,10101,11011,10001",
+    X:"10001,10001,01010,00100,01010,10001,10001",
+    Y:"10001,10001,01010,00100,00100,00100,00100",
+    Z:"11111,00001,00010,00100,01000,10000,11111",
+    "0":"01110,10001,10011,10101,11001,10001,01110",
+    "1":"00100,01100,00100,00100,00100,00100,01110",
+    "2":"01110,10001,00001,00010,00100,01000,11111",
+    "3":"11110,00001,00001,01110,00001,00001,11110",
+    "4":"00010,00110,01010,10010,11111,00010,00010",
+    "5":"11111,10000,11110,00001,00001,10001,01110",
+    "6":"00110,01000,10000,11110,10001,10001,01110",
+    "7":"11111,00001,00010,00100,01000,01000,01000",
+    "8":"01110,10001,10001,01110,10001,10001,01110",
+    "9":"01110,10001,10001,01111,00001,00010,01100",
+    " ":"00000,00000,00000,00000,00000,00000,00000",
+    ":":"00000,00100,00100,00000,00100,00100,00000",
+    ".":"00000,00000,00000,00000,00000,00100,00100",
+    ",":"00000,00000,00000,00000,00100,00100,01000",
+    "/":"00001,00010,00010,00100,01000,01000,10000",
+    "=":"00000,00000,11111,00000,11111,00000,00000",
+    "-":"00000,00000,00000,11111,00000,00000,00000",
+    "!":"00100,00100,00100,00100,00100,00000,00100",
+    "?":"01110,10001,00001,00110,00100,00000,00100",
+    "(":"00010,00100,01000,01000,01000,00100,00010",
+    ")":"01000,00100,00010,00010,00010,00100,01000",
+    "'":"00100,00100,00000,00000,00000,00000,00000",
+    "+":"00000,00100,00100,11111,00100,00100,00000",
+    "_":"00000,00000,00000,00000,00000,00000,11111"
+  };
+  const GLYPH = {};
+  for (const k in FONT) GLYPH[k] = FONT[k].split(",");
+
+  const GW = 5, GH = 7, ADV = 6;
+
+  function textWidth(str, scale) { return str.length * ADV * scale; }
+
+  function drawText(str, x, y, scale, color, opts) {
+    opts = opts || {};
+    str = String(str).toUpperCase();
+    const skew = opts.skew || 0;
+    const align = opts.align || "left";
+    const total = textWidth(str, scale);
+    let sx = x;
+    if (align === "center") sx = Math.round(x - total / 2);
+    else if (align === "right") sx = Math.round(x - total);
+    const passes = opts.outline ? 9 : 1;
+    for (let pass = 0; pass < passes; pass++) {
+      let ox = 0, oy = 0;
+      let fill = color;
+      if (opts.outline) {
+        if (pass < 8) {
+          const dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]];
+          ox = dirs[pass][0] * scale; oy = dirs[pass][1] * scale;
+          fill = opts.outline;
+        } else {
+          fill = color;
+        }
+      }
+      ctx.fillStyle = fill;
+      for (let i = 0; i < str.length; i++) {
+        const g = GLYPH[str[i]] || GLYPH[" "];
+        const cx = sx + i * ADV * scale + ox;
+        for (let r = 0; r < GH; r++) {
+          const row = g[r];
+          const rowShift = skew ? Math.round((GH - 1 - r) * skew) : 0;
+          for (let c = 0; c < GW; c++) {
+            if (row[c] === "1") {
+              ctx.fillRect(cx + c * scale + rowShift, y + r * scale + oy, scale, scale);
+            }
+          }
+        }
+      }
+      if (!opts.outline) break;
+    }
+  }
+
+  function shadowText(str, x, y, scale, color, shadow, align, skew) {
+    drawText(str, x + scale, y + scale, scale, shadow, { align: align, skew: skew });
+    drawText(str, x, y, scale, color, { align: align, skew: skew });
+  }
+
+  /* ---------- pixel sprites ---------- */
+  function padRows(rows, w) {
+    return rows.map(function (r) { return (r + ".".repeat(w)).slice(0, w); });
+  }
+  function makeSprite(rows, w, scale) {
+    scale = scale || 2;
+    const data = padRows(rows, w);
+    const h = data.length;
+    const c = document.createElement("canvas");
+    c.width = w * scale; c.height = h * scale;
+    const g = c.getContext("2d");
+    g.imageSmoothingEnabled = false;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const ch = data[y][x];
+        if (ch === "." || ch === " ") continue;
+        g.fillStyle = C[ch] || "#000";
+        g.fillRect(x * scale, y * scale, scale, scale);
+      }
+    }
+    return c;
+  }
+  function mirror(rows) {
+    return rows.map(function (r) { return r.split("").reverse().join(""); });
+  }
+
+  const DOWN = [
+    "................",
+    ".....KKKKKK.....",
+    "....KYYYYYYK....",
+    "....KYYYYYYK....",
+    "....KSSSSSSK....",
+    "..KKKRRRRRRKKK..",
+    ".KRRKRRRRRRKRRK.",
+    ".KRRKRRRRRRKRRK.",
+    "..KKKRRRRRRKKK..",
+    "....KRRRRRRK....",
+    "....KBBBBBBK....",
+    "....KBBKKBBK....",
+    "....KBK..KBK....",
+    "...KGGK..KGGK...",
+    "...KGGK..KGGK...",
+    "...KKKK..KKKK..."
+  ];
+  const LEFT = [
+    "................",
+    "......KKKK......",
+    ".....KYYYYK.....",
+    ".....KYYYYK.....",
+    ".....KSSSSK.....",
+    "....KKRRRRKK....",
+    "...KRRRRRRRRK...",
+    "..KRRRRRRRRRRK..",
+    "..KRRRRRRRRRRK..",
+    "...KKRRRRRRKK...",
+    "....KBBBBBBK....",
+    "...KBBK.KBBK....",
+    "..KBBK...KBBK...",
+    ".KGGK.....KGGK..",
+    ".KKK.......KKK..",
+    "................"
+  ];
+  const HARD_LEFT = [
+    "................",
+    "................",
+    ".......KKKK.....",
+    "......KYYYYK....",
+    "......KSSSSK....",
+    ".....KKRRRRK....",
+    "....KRRRRRRK....",
+    "...KRRRRRRRK....",
+    "...KRRRRRRRK....",
+    "....KBBBBBBK....",
+    "...KBBK.KBBK....",
+    "..KBBK...KBBK...",
+    ".KGGK.....KGGK..",
+    "KGGK.......KGGK.",
+    ".KK.........KK..",
+    "................"
+  ];
+  const STOP_RIGHT = [
+    "................",
+    "................",
+    ".......KKKK.....",
+    "......KYYYYK....",
+    "......KSSSSK....",
+    ".....KKRRRRK....",
+    "....KRRRRRRK....",
+    "....KRRRRRRK....",
+    "...KRRRRRRRK....",
+    "....KKBBBBKK....",
+    ".....KBBBBK.....",
+    ".....KBBKBBK....",
+    ".....KBBKBBK....",
+    "....KGGK.KGGK...",
+    "...KGGK...KGGK..",
+    "...KKK.....KKK.."
+  ];
+  const CRASH = [
+    "................",
+    "................",
+    "......KKKK......",
+    ".....KYYYYK.....",
+    ".....KSSSSK.....",
+    ".....KSSSSK.....",
+    "....KKRRRRKK....",
+    "...KRRRRRRRRK...",
+    "..KRRRRRRRRRRK..",
+    "..KRRRRRRRRRRK..",
+    "..KKBBBBBBBBKK..",
+    "...KBBK..KBBK...",
+    "..KGGK....KGGK..",
+    ".KGGK..KK..KGGK.",
+    ".KKK...KK...KKK.",
+    "................"
+  ];
+  const AIR = [
+    "................",
+    "..KK........KK..",
+    ".KGGK......KGGK.",
+    ".KGGK......KGGK.",
+    "..KKK......KKK..",
+    "....KKKKKKKK....",
+    "...KYYYYYYYYK...",
+    "...KSSSSSSSSK...",
+    "..KKRRRRRRRRKK..",
+    ".KRRRRRRRRRRRRK.",
+    ".KRRRRRRRRRRRRK.",
+    "..KKBBBBBBBBKK..",
+    "....KBBKKBBK....",
+    "....KBK..KBK....",
+    "...KGGK..KGGK...",
+    "...KKK....KKK..."
+  ];
+  const TREE_SMALL = [
+    "................",
+    ".......KK.......",
+    "......KNNK......",
+    ".....KNNNNK.....",
+    "....KLNNNNNK....",
+    "......KNNK......",
+    ".....KNNNNK.....",
+    "....KNNNNNNK....",
+    "...KLNNNNNNNK...",
+    ".....KNNNNK.....",
+    "....KNNNNNNK....",
+    "...KNNNNNNNNK...",
+    "..KLNNNNNNNNNK..",
+    ".......TT.......",
+    ".......TT.......",
+    "......KKKK......"
+  ];
+  const TREE_BIG = [
+    "........................",
+    "..........KK............",
+    ".........KNNK...........",
+    "........KNNNNK..........",
+    ".......KLNNNNNK.........",
+    "........KNNNNK..........",
+    ".......KNNNNNNK.........",
+    "......KNNNNNNNNK........",
+    ".....KLNNNNNNNNNK.......",
+    "......KNNNNNNNNK........",
+    "....KNNNNNNNNNNNNK......",
+    "...KNNNNNNNNNNNNNNK.....",
+    "..KLNNNNNNNNNNNNNNNK....",
+    "...KNNNNNNNNNNNNNNK.....",
+    "..KNNNNNNNNNNNNNNNNK....",
+    ".KLNNNNNNNNNNNNNNNNNK...",
+    "..KNNNNNNNNNNNNNNNNK....",
+    ".KNNNNNNNNNNNNNNNNNNK...",
+    "KNNNNNNNNNNNNNNNNNNNNK..",
+    ".KNNNNNNNNNNNNNNNNNNK...",
+    "..KNNNNNNNNNNNNNNNNK....",
+    "...KNNNNNNNNNNNNNNK.....",
+    ".....KNNNNNNNNNNK.......",
+    ".......KNNNNNNK.........",
+    ".......KNNNNNNK.........",
+    "........KTTTTK..........",
+    "........KTTTTK..........",
+    "........KTTTTK..........",
+    "........KTTTTK..........",
+    ".......KKTTTTKK.........",
+    "......KTTTTTTTTK........",
+    "......KKKKKKKKKK........"
+  ];
+  const ROCK = [
+    "................",
+    ".....KKKKKK.....",
+    "...KKDDDDDDKK...",
+    "..KDDDDDDDDDDK..",
+    ".KDDDDDDDDDDDDK.",
+    ".KDDWWDDDDDDDDK.",
+    "KDDWWWWDDDDDDDK.",
+    "KDDDWWDDDDDDDDK.",
+    "KDDDDDDDDDDDDDK.",
+    ".KDDDDDDDDDDDK..",
+    "..KKDDDDDDDDKK..",
+    "....KKKKKKKK...."
+  ];
+  const STUMP = [
+    "............",
+    "...KKKKKK...",
+    "..KTTTTTTK..",
+    ".KTTKTTKTTK.",
+    ".KTTTTTTTTK.",
+    ".KTTKTTKTTK.",
+    ".KTTTTTTTTK.",
+    "..KTTTTTTK..",
+    "..KKKKKKKK..",
+    "............"
+  ];
+  const YETI_CLOSED = [
+    "........KKKKKK..........",
+    ".......KGGGGGGK.........",
+    "......KGGGGGGGGK........",
+    ".....KGGGGGGGGGGK.......",
+    ".....KGGWWWWWWGGK.......",
+    ".....KGWKWWWWKWGK.......",
+    ".....KGWKKWWKKWGK.......",
+    ".....KGWKKWWKKWGK.......",
+    ".....KGWKWWWWKWGK.......",
+    ".....KGWKKKKKKWGK.......",
+    ".....KGWKWKWKWWGK.......",
+    ".....KGGKKKKKKGGK.......",
+    "......KGGWWWWGGK........",
+    ".....KGGGGGGGGGGK.......",
+    "....KGGGGGGGGGGGGK......",
+    "...KGGGKGGGGGGKGGGK.....",
+    "...KGGGKGGGGGGKGGGK.....",
+    "..KGGGGKGGGGGGKGGGGK....",
+    "..KGGGGKGGGGGGKGGGGK....",
+    "..KGGGGKGGGGGGKGGGGK....",
+    "...KGGGKGGGGGGKGGGK.....",
+    "....KGGKGGGGGGKGGK......",
+    ".....KKKGGGGGGKKK.......",
+    ".......KGGGGGGK.........",
+    ".......KGGGGGGK.........",
+    "......KGGK..KGGK........",
+    ".....KGGK....KGGK.......",
+    ".....KGGK....KGGK.......",
+    "....KGGK......KGGK......",
+    "....KGK........KGK......",
+    "...KKKK........KKKK.....",
+    "........................"
+  ];
+  const YETI_OPEN = YETI_CLOSED.slice();
+  YETI_OPEN[9] = ".....KGKKKKKKKKGK.......";
+  YETI_OPEN[10] = ".....KGKWKWKWKWGK.......";
+  YETI_OPEN[11] = ".....KGKKKKKKKKGK.......";
+  YETI_OPEN[12] = "......KGKKKKKKGK........";
+
+  const SPR = {
+    down: makeSprite(DOWN, 16),    left: makeSprite(LEFT, 16),
+    right: makeSprite(mirror(LEFT), 16),
+    hardLeft: makeSprite(HARD_LEFT, 16),
+    hardRight: makeSprite(mirror(HARD_LEFT), 16),
+    stopLeft: makeSprite(mirror(STOP_RIGHT), 16),
+    stopRight: makeSprite(STOP_RIGHT, 16),
+    crash: makeSprite(CRASH, 16),
+    air: makeSprite(AIR, 16),
+    treeSmall: makeSprite(TREE_SMALL, 16),
+    treeBig: makeSprite(TREE_BIG, 24),
+    rock: makeSprite(ROCK, 16),
+    stump: makeSprite(STUMP, 12),
+    yeti: makeSprite(YETI_CLOSED, 24),
+    yetiOpen: makeSprite(YETI_OPEN, 24),
+    icon: makeSprite(DOWN, 16, 1)
+  };
+
+  /* ---------- window icon ---------- */
+  (function drawIcon() {
+    const ic = document.getElementById("icon");
+    const g = ic.getContext("2d");
+    g.imageSmoothingEnabled = false;
+    g.fillStyle = "#ffffff"; g.fillRect(0, 0, 16, 16);
+    g.drawImage(SPR.icon, 0, 0);
+  })();
+
+  /* ---------- audio ---------- */
+  const Sound = (function () {
+    let ac = null, master = null, hiss = null, hissGain = null, noiseBuf = null;
+    let muted = false;
+
+    function init() {
+      if (ac) { if (ac.state === "suspended") ac.resume().catch(function(){}); return; }
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      try {
+        ac = new AC();
+        master = ac.createGain();
+        master.gain.value = muted ? 0 : 0.3;
+        master.connect(ac.destination);
+
+        const len = ac.sampleRate * 2;
+        noiseBuf = ac.createBuffer(1, len, ac.sampleRate);
+        const d = noiseBuf.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+
+        const src = ac.createBufferSource();
+        src.buffer = noiseBuf; src.loop = true;
+        const bp = ac.createBiquadFilter();
+        bp.type = "bandpass"; bp.frequency.value = 1500; bp.Q.value = 0.8;
+        hissGain = ac.createGain();
+        hissGain.gain.value = 0;
+        src.connect(bp); bp.connect(hissGain); hissGain.connect(master);
+        src.start();
+        hiss = { src: src, bp: bp };
+      } catch (e) { ac = null; }
+    }
+
+    function env(node, vol, dur, at) {
+      const t = at || ac.currentTime;
+      node.gain.setValueAtTime(0.0001, t);
+      node.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t + 0.01);
+      node.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    }
+
+    function tone(f0, f1, dur, type, vol) {
+      if (!ac || muted) return;
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = type || "square";
+      o.frequency.setValueAtTime(f0, ac.currentTime);
+      if (f1) o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), ac.currentTime + dur);
+      env(g, vol || 0.18, dur);
+      o.connect(g); g.connect(master);
+      o.start(); o.stop(ac.currentTime + dur + 0.02);
+    }
+
+    function noise(dur, vol, freq, type) {
+      if (!ac || muted || !noiseBuf) return;
+      const s = ac.createBufferSource();
+      s.buffer = noiseBuf;
+      const f = ac.createBiquadFilter();
+      f.type = type || "lowpass"; f.frequency.value = freq || 800;
+      const g = ac.createGain();
+      env(g, vol || 0.3, dur);
+      s.connect(f); f.connect(g); g.connect(master);
+      s.start(); s.stop(ac.currentTime + dur + 0.02);
+    }
+
+    return {
+      init: init,
+      isMuted: function () { return muted; },
+      toggle: function () {
+        muted = !muted;
+        if (master) master.gain.value = muted ? 0 : 0.3;
+        return muted;
+      },
+      hiss: function (level) {
+        if (!ac || !hissGain) return;
+        const target = muted ? 0 : Math.max(0, Math.min(0.16, level));
+        hissGain.gain.setTargetAtTime(target, ac.currentTime, 0.07);
+      },
+      jump: function () { tone(300, 900, 0.16, "square", 0.16); setTimeout(function(){ tone(700, 1300, 0.12, "square", 0.10); }, 70); },
+      crash: function () { noise(0.28, 0.5, 500); tone(90, 40, 0.3, "sine", 0.4); },
+      roar: function () { tone(110, 55, 0.9, "sawtooth", 0.22); noise(0.8, 0.18, 380); },
+      chomp: function () { noise(0.07, 0.45, 700); setTimeout(function(){ noise(0.08, 0.45, 600); }, 90); setTimeout(function(){ noise(0.09, 0.5, 500); }, 190); },
+      step: function () { tone(70, 45, 0.08, "sine", 0.18); },
+      happy: function () {
+        const notes = [523, 659, 784, 1046];
+        notes.forEach(function (n, i) { setTimeout(function () { tone(n, n, 0.1, "square", 0.13); }, i * 100); });
+      },
+      click: function () { tone(880, 880, 0.04, "square", 0.12); },
+      land: function () { noise(0.06, 0.16, 900); }
+    };
+  })();
+
+  /* ---------- game state ---------- */
+  const p = {
+    x: W / 2, worldY: START_Y, angle: 1, speed: 0,
+    air: null, invuln: 0, crashTimer: 0
+  };
+
+  let state = "ready";           // ready | skiing | crashed | eaten | gameover
+  let cameraY = 0;
+  let dist = 0;
+  let time = 0;
+  let style = 0;
+  let shake = 0;
+  let paused = false;
+  let last = 0;
+  let acc = 0;
+  let blink = 0;
+  let hintFlash = 0;
+  let warnTimer = 0;
+  let spawnCursor = -H;
+  let nextRampY = -600;
+  let tracks = [];
+  let prevTrack = null;
+  let obstacles = [];
+  let moguls = [];
+  let eatenTimer = 0;
+  let eatenFrame = 0;
+  let happyPlayed = false;
+  let jumpFlash = 0;
+
+  const yeti = {
+    active: false, x: W / 2, y: -100, stepT: 0, hop: 0, caught: false
+  };
+
+  const keys = { left: false, right: false, down: false, up: false, boost: false };
+  let steerT = 0;
+
+  const statusMsg = document.getElementById("statusMsg");
+  const statusHint = document.getElementById("statusHint");
+  const banner = "Made by Synapsespiral | Copyright 2026 Synapse";
+  let bannerTimer = 0;
+
+  /* ---------- helpers ---------- */
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+  function rand(a, b) { return a + Math.random() * (b - a); }
+  function fmtTime(t) {
+    const cs = Math.floor((t % 1) * 100);
+    const s = Math.floor(t) % 60;
+    const m = Math.floor(t / 60) % 60;
+    const h = Math.floor(t / 3600);
+    return h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0") + "." + String(cs).padStart(2, "0");
+  }
+  function fmtDist(d) { return String(Math.floor(d)).padStart(3, "0") + "M"; }
+  function setBanner(msg) { statusMsg.textContent = msg; bannerTimer = 2.5; }
+
+  /* ---------- world generation ---------- */
+  function makeObstacle(type, x, worldY) {
+    const o = { type: type, x: x, y: worldY, used: false };
+    if (type === "tree") { o.w = 16; o.h = 16; o.scale = 2; }
+    else if (type === "treeBig") { o.w = 24; o.h = 32; o.scale = 2; }
+    else if (type === "rock") { o.w = 16; o.h = 12; o.scale = 2; }
+    else if (type === "stump") { o.w = 12; o.h = 10; o.scale = 2; }
+    else if (type === "ramp") { o.w = 24; o.h = 6; o.scale = 2; }
+    return o;
+  }
+
+  function spawnRow(worldY) {
+    if (worldY > 55 && worldY < 225) return;   // keep the painted start slope clear
+    const progress = clamp(dist / 1500, 0, 1);
+    const gapFactor = 1 - progress * 0.45;
+    const count = Math.random() < 0.45 + progress * 0.2 ? 2 : 1;
+    for (let i = 0; i < count; i++) {
+      let type;
+      const r = Math.random();
+      if (r < 0.12) type = "ramp";
+      else if (r < 0.5) type = "tree";
+      else if (r < 0.72) type = "treeBig";
+      else if (r < 0.88) type = "rock";
+      else type = "stump";
+
+      const x = rand(34, W - 34);
+      if (type === "ramp") {
+        if (Math.abs(worldY - nextRampY) < 140) continue;
+        if (worldY < 120) continue;
+        nextRampY = worldY;
+      }
+      let clash = false;
+      for (let j = 0; j < obstacles.length; j++) {
+        const o = obstacles[j];
+        if (Math.abs(o.y - worldY) < 34 && Math.abs(o.x - x) < 46) { clash = true; break; }
+      }
+      if (clash) continue;
+      obstacles.push(makeObstacle(type, x, worldY));
+    }
+    // sparse mogul lines
+    if (Math.random() < 0.75) {
+      moguls.push({ x: rand(20, W - 20), y: worldY + rand(-20, 20), r: rand(7, 22), flip: Math.random() < 0.5 });
+    }
+  }
+
+  function generate() {
+    const gap = Math.max(54, 116 - dist * 0.045);
+    // terrain lives below the viewport and scrolls UP toward the skier
+    while (spawnCursor < cameraY + H + 300) {
+      spawnRow(spawnCursor);
+      spawnCursor += gap * (0.85 + Math.random() * 0.3);
+    }
+    obstacles = obstacles.filter(function (o) { return o.y > cameraY - 140; });
+    moguls = moguls.filter(function (m) { return m.y > cameraY - 100 && m.y < cameraY + H + 700; });
+  }
+
+  function reset() {
+    state = "ready";
+    p.x = W / 2; p.worldY = START_Y; p.angle = 1; p.speed = 0;
+    p.air = null; p.invuln = 0; p.crashTimer = 0;
+    cameraY = 0; dist = 0; time = 0; style = 0; shake = 0;
+    spawnCursor = H + 80; nextRampY = -600;
+    tracks = []; prevTrack = null; obstacles = []; moguls = [];
+    eatenTimer = 0; eatenFrame = 0; happyPlayed = false;
+    yeti.active = false; yeti.caught = false; yeti.y = -100; yeti.x = W / 2; yeti.hop = 0;
+    warnTimer = 0; jumpFlash = 0;
+    keys.left = keys.right = keys.down = keys.up = keys.boost = false;
+    steerT = 0;
+    Sound.hiss(0);
+    generate();
+  }
+
+  /* ---------- collision ---------- */
+  function rectFor(o, sy) {
+    if (o.type === "tree") return { x0: o.x - 7, x1: o.x + 7, y0: sy - 12, y1: sy + 3 };
+    if (o.type === "treeBig") return { x0: o.x - 10, x1: o.x + 10, y0: sy - 14, y1: sy + 5 };
+    if (o.type === "rock") return { x0: o.x - 14, x1: o.x + 14, y0: sy - 15, y1: sy - 2 };
+    if (o.type === "stump") return { x0: o.x - 9, x1: o.x + 9, y0: sy - 8, y1: sy + 2 };
+    if (o.type === "ramp") return { x0: o.x - 26, x1: o.x + 26, y0: sy - 5, y1: sy + 7 };
+    return { x0: o.x, x1: o.x, y0: sy, y1: sy };
+  }
+
+  function circleRect(px, py, r, rc) {
+    const cx = clamp(px, rc.x0, rc.x1);
+    const cy = clamp(py, rc.y0, rc.y1);
+    const dx = px - cx, dy = py - cy;
+    return dx * dx + dy * dy <= r * r;
+  }
+
+  function crash() {
+    if (state !== "skiing") return;
+    state = "crashed";
+    p.crashTimer = 1.05;
+    p.speed = 0;
+    p.air = null;
+    style = Math.max(0, style - 25);
+    shake = 0.35;
+    prevTrack = null;
+    Sound.crash();
+    Sound.hiss(0);
+  }
+
+  function jump() {
+    if (state !== "skiing" || p.air) return;
+    p.air = { t: 0, dur: 0.95, h: 30 };
+    style += 50;
+    jumpFlash = 0.5;
+    Sound.jump();
+    prevTrack = null;
+  }
+
+  /* ---------- update ---------- */
+  function startGame() {
+    if (state !== "ready") return;
+    state = "skiing";
+    p.speed = 70;
+    p.angle = 0;
+    Sound.init();
+  }
+
+  function stepAngle(dir) {
+    if (state === "ready") startGame();
+    if (state !== "skiing") return;
+    p.angle = clamp(p.angle + dir, -2, 2);
+  }
+
+  function update(dt) {
+    if (blink === 0) blink = 0.0001;
+    blink += dt;
+    if (jumpFlash > 0) jumpFlash -= dt;
+    if (warnTimer > 0) warnTimer -= dt;
+    if (bannerTimer > 0) {
+      bannerTimer -= dt;
+      if (bannerTimer <= 0) statusMsg.textContent = banner;
+    }
+    if (hintFlash > 0) hintFlash -= dt;
+    if (shake > 0) shake = Math.max(0, shake - dt);
+
+    if (state === "ready") {
+      if (keys.left) { startGame(); p.angle = -1; }
+      else if (keys.right) { startGame(); p.angle = 1; }
+      else if (keys.down) { startGame(); p.angle = 0; }
+      else if (keys.up) { startGame(); }
+      else if (keys.boost) { startGame(); }
+      Sound.hiss(0);
+      return;
+    }
+
+    if (state === "crashed") {
+      time += dt;
+      p.crashTimer -= dt;
+      if (p.crashTimer <= 0) {
+        state = "skiing";
+        p.angle = 0;
+        p.speed = 55;
+        p.invuln = 0.9;
+      }
+      Sound.hiss(0);
+      updateYeti(dt);
+      return;
+    }
+
+    if (state === "eaten") {
+      eatenTimer += dt;
+      const f = Math.floor(eatenTimer / 0.18);
+      if (f !== eatenFrame) {
+        eatenFrame = f;
+        if (f < 4) Sound.chomp();
+      }
+      if (eatenTimer > 0.72 && !happyPlayed) {
+        happyPlayed = true;
+        Sound.happy();
+      }
+      yeti.hop = eatenTimer > 0.72 ? Math.abs(Math.sin((eatenTimer - 0.72) * 7)) * 18 : 0;
+      if (eatenTimer > 2.15) {
+        state = "gameover";
+        Sound.hiss(0);
+      }
+      shake = Math.max(shake, 0.18);
+      return;
+    }
+
+    if (state === "gameover") {
+      Sound.hiss(0);
+      return;
+    }
+
+    /* ---- skiing ---- */
+    time += dt;
+    if (p.invuln > 0) p.invuln -= dt;
+
+    // held steering repeat
+    steerT -= dt;
+    if (keys.left || keys.right) {
+      if (steerT <= 0) {
+        p.angle = clamp(p.angle + (keys.left ? -1 : 1), -2, 2);
+        steerT = 0.16;
+      }
+    } else if (keys.down) {
+      p.angle = 0;
+    } else {
+      steerT = 0;
+    }
+
+    const absA = Math.abs(p.angle);
+    const base = [232, 176, 122][absA];
+    let target = base * (1 + Math.min(0.22, dist / 4200));
+    if (keys.up) target = 0;
+    if (keys.boost && !keys.up) target *= 1.8;
+    const accel = keys.up ? 950 : (keys.boost ? 380 : 210);
+    if (p.speed < target) p.speed = Math.min(target, p.speed + accel * dt);
+    else p.speed = Math.max(target, p.speed - accel * dt);
+    if (p.speed < 2) p.speed = 0;
+
+    const rad = p.angle * 0.46;
+    const vx = Math.sin(rad) * p.speed;
+    const vy = Math.cos(rad) * p.speed;
+
+    p.worldY += vy * dt;
+    p.x += vx * dt;
+    if (p.x < 22) { p.x = 22; if (p.angle < 0) p.angle = 0; }
+    if (p.x > W - 22) { p.x = W - 22; if (p.angle > 0) p.angle = 0; }
+
+    cameraY = p.worldY - PLAYER_Y;
+    dist = Math.max(0, (p.worldY - START_Y) / PX_PER_M);
+
+    generate();
+
+    // jump physics
+    if (p.air) {
+      p.air.t += dt;
+      if (p.air.t >= p.air.dur) {
+        p.air = null;
+        Sound.land();
+        prevTrack = null;
+      }
+    }
+
+    // collisions (ground only)
+    if (!p.air && p.invuln <= 0) {
+      for (let i = 0; i < obstacles.length; i++) {
+        const o = obstacles[i];
+        const sy = o.y - cameraY;
+        if (sy < -80 || sy > H + 80) continue;
+        const rc = rectFor(o, sy);
+        if (!circleRect(p.x, PLAYER_Y, 6, rc)) continue;
+        if (o.type === "ramp") {
+          if (!o.used) { o.used = true; jump(); }
+        } else {
+          crash();
+          break;
+        }
+      }
+    }
+
+    // ski tracks
+    if (!p.air && p.speed > 0) {
+      const cur = { x: p.x, y: p.worldY };
+      if (!prevTrack || Math.abs(cur.y - prevTrack.y) > 9) {
+        if (prevTrack) {
+          const dx = cur.x - prevTrack.x, dy = cur.y - prevTrack.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const nx = -dy / len * 3.2, ny = dx / len * 3.2;
+          tracks.push({ x1: prevTrack.x + nx, y1: prevTrack.y + ny, x2: cur.x + nx, y2: cur.y + ny });
+          tracks.push({ x1: prevTrack.x - nx, y1: prevTrack.y - ny, x2: cur.x - nx, y2: cur.y - ny });
+        }
+        prevTrack = cur;
+      }
+    } else {
+      prevTrack = null;
+    }
+    if (tracks.length > 620) tracks.splice(0, tracks.length - 620);
+
+    // audio
+    const hiss = 0.012 + (p.speed / 232) * 0.05 + (keys.boost ? 0.04 : 0);
+    Sound.hiss(state === "skiing" ? hiss : 0);
+
+    // yeti trigger
+    if (!yeti.active && dist >= YETI_AT) {
+      yeti.active = true;
+      yeti.x = clamp(p.x + rand(-90, 90), 40, W - 40);
+      yeti.y = -40;
+      warnTimer = 3;
+      shake = 0.4;
+      Sound.roar();
+      setBanner("THE ABOMINABLE SNOWMAN IS BEHIND YOU!");
+    }
+
+    updateYeti(dt);
+  }
+
+  function updateYeti(dt) {
+    if (!yeti.active || yeti.caught) return;
+    if (state === "eaten" || state === "gameover") return;
+
+    const vy = Math.cos(p.angle * 0.46) * p.speed;
+    yeti.y += (330 - vy) * dt;
+    yeti.y = Math.max(-150, yeti.y);
+    const dx = p.x - yeti.x;
+    yeti.x += clamp(dx, -150 * dt, 150 * dt);
+
+    yeti.stepT -= dt;
+    if (yeti.stepT <= 0 && yeti.y > -60) {
+      yeti.stepT = 0.34;
+      Sound.step();
+    }
+
+    if (Math.abs(yeti.x - p.x) < 26 && yeti.y > PLAYER_Y - 20) {
+      yeti.caught = true;
+      state = "eaten";
+      eatenTimer = 0;
+      eatenFrame = -1;
+      happyPlayed = false;
+      shake = 0.5;
+      Sound.hiss(0);
+      Sound.chomp();
+      setBanner("CHOMP!");
+    }
+  }
+
+  /* ---------- drawing ---------- */
+  function drawSnow() {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawMoguls() {
+    ctx.strokeStyle = "#999999";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < moguls.length; i++) {
+      const m = moguls[i];
+      const sy = m.y - cameraY;
+      if (sy < -30 || sy > H + 30) continue;
+      ctx.beginPath();
+      if (m.flip) ctx.arc(Math.round(m.x) + 0.5, Math.round(sy) + 0.5, m.r, Math.PI * 0.15, Math.PI * 0.85);
+      else ctx.arc(Math.round(m.x) + 0.5, Math.round(sy) + 0.5, m.r, Math.PI * 1.15, Math.PI * 1.85);
+      ctx.stroke();
+    }
+  }
+
+  function drawTracks() {
+    ctx.strokeStyle = "#c8c8c8";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
+      const y1 = t.y1 - cameraY, y2 = t.y2 - cameraY;
+      if (y1 < -40 && y2 < -40) continue;
+      if (y1 > H + 40 && y2 > H + 40) continue;
+      ctx.moveTo(Math.round(t.x1) + 0.5, Math.round(y1) + 0.5);
+      ctx.lineTo(Math.round(t.x2) + 0.5, Math.round(y2) + 0.5);
+    }
+    ctx.stroke();
+  }
+
+  function drawLogo() {
+    const logoY = 26 - cameraY;
+    if (logoY > -80 && logoY < H + 40) {
+      const x = 280;
+      drawText("SKIFREE", x + 8, logoY + 8, 5, "#ffd800", { align: "center", skew: 2 });
+      drawText("SKIFREE", x, logoY, 5, "#0000a8", { align: "center", skew: 2, outline: "#000000" });
+      drawText("MADE BY SYNAPSESPIRAL", x, logoY + 50, 2, "#000000", { align: "center" });
+      drawText("COPYRIGHT 2026 SYNAPSE", x, logoY + 66, 2, "#000000", { align: "center" });
+    }
+  }
+
+  function drawSign(x, y, label, w) {
+    const bh = 13;
+    // post
+    ctx.fillStyle = "#7a4a20";
+    ctx.fillRect(x + w / 2 - 2, y + bh, 4, 12);
+    // board with hard bevel
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(x - 1, y - 1, w + 2, bh + 2);
+    ctx.fillStyle = "#006400";
+    ctx.fillRect(x, y, w, bh);
+    ctx.fillStyle = "#ffe000";
+    ctx.fillRect(x + 2, y + 2, w - 4, bh - 4);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(x + 2, y + 2, w - 4, 1);
+    drawText(label, x + w / 2, y + 3, 1, "#000000", { align: "center" });
+  }
+
+  function drawStartSlope() {
+    drawLogo();
+    const sy = 132 - cameraY;
+    if (sy > -80 && sy < H + 60) {
+      drawSign(22, sy, "CONTROLS: ARROWS / WASD", 162);
+      drawSign(22, sy + 26, "F = BOOST", 162);
+      drawSign(22, sy + 52, "F2 = RESTART", 162);
+      drawSign(W - 184, sy + 13, "SPACE = JUMP", 162);
+      drawSign(W - 184, sy + 39, "RAMP = +50 STYLE", 162);
+    }
+  }
+
+  function drawRamp(o, sy) {
+    const w = 48, h = 12;
+    const x = Math.round(o.x - w / 2);
+    const y = Math.round(sy - h);
+    const cols = ["#ff0000", "#ff8000", "#ffe000", "#00a000", "#0040ff", "#8000c0"];
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+    for (let i = 0; i < 6; i++) {
+      ctx.fillStyle = o.used ? "#b0b0b0" : cols[i];
+      ctx.fillRect(x, y + i * 2, w, 2);
+    }
+    // kicker lip
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(x - 1, y + h - 2, 6, 3);
+    ctx.fillRect(x + w - 5, y + h - 2, 6, 3);
+  }
+
+  function drawObstacle(o) {
+    const sy = o.y - cameraY;
+    if (sy < -90 || sy > H + 90) return;
+    if (o.type === "ramp") { drawRamp(o, sy); return; }
+    let img = null;
+    if (o.type === "tree") img = SPR.treeSmall;
+    else if (o.type === "treeBig") img = SPR.treeBig;
+    else if (o.type === "rock") img = SPR.rock;
+    else if (o.type === "stump") img = SPR.stump;
+    if (!img) return;
+    ctx.drawImage(img, Math.round(o.x - img.width / 2), Math.round(sy - img.height));
+  }
+
+  function drawYeti() {
+    if (!yeti.active) return;
+    if (state === "gameover") return;
+    const img = (state === "eaten" && eatenFrame % 2 === 0) ? SPR.yetiOpen : SPR.yeti;
+    const wobble = state === "eaten" ? [0, -3, 0, 2][Math.min(3, Math.max(0, eatenFrame))] : 0;
+    const x = Math.round(yeti.x - img.width / 2);
+    const y = Math.round(yeti.y - img.height - yeti.hop + wobble);
+    if (y > H + 40) return;
+
+    // waving stick arms (procedural, pixel-blocky)
+    const t = blink;
+    const shoulderY = yeti.y - yeti.hop - 44;
+    const swing = Math.sin(t * 9) * 0.7;
+    drawStickArm(yeti.x - 15, shoulderY, -1, swing);
+    drawStickArm(yeti.x + 15, shoulderY, 1, -swing);
+
+    ctx.drawImage(img, x, y);
+
+  }
+
+  function drawStickArm(sx, sy, dir, swing) {
+    const handX = sx + dir * (26 + Math.cos(swing) * 8);
+    const handY = sy - 10 + Math.sin(swing) * 16;
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "#000000";
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(handX, handY); ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#8a8a8a";
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(handX, handY); ctx.stroke();
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(Math.round(handX) - 2, Math.round(handY) - 2, 5, 5);
+    ctx.fillStyle = "#8a8a8a";
+    ctx.fillRect(Math.round(handX) - 1, Math.round(handY) - 1, 3, 3);
+  }
+
+  function playerSprite() {
+    if (state === "crashed") return SPR.crash;
+    if (p.air) return SPR.air;
+    if (p.speed < 6) return p.angle < 0 ? SPR.stopLeft : SPR.stopRight;
+    if (p.angle <= -2) return SPR.hardLeft;
+    if (p.angle === -1) return SPR.left;
+    if (p.angle >= 2) return SPR.hardRight;
+    if (p.angle === 1) return SPR.right;
+    return SPR.down;
+  }
+
+  function drawPlayer() {
+    if (state === "eaten" || state === "gameover") return;
+    const img = playerSprite();
+    const z = p.air ? Math.round(4 * p.air.h * (p.air.t / p.air.dur) * (1 - p.air.t / p.air.dur)) : 0;
+    const sy = PLAYER_Y - z;
+
+    if (p.air) {
+      ctx.strokeStyle = "#b0b0b0";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(Math.round(p.x) + 0.5, PLAYER_Y + 8, 10, 3, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.drawImage(img, Math.round(p.x - img.width / 2), Math.round(sy - img.height));
+
+    if (state === "crashed") {
+      drawText("OUCH!", p.x, sy - img.height - 14, 2, "#c81e1e", { align: "center", outline: "#000000" });
+    }
+    if (jumpFlash > 0) {
+      drawText("+50 STYLE", p.x, sy - img.height - 16, 1, "#006400", { align: "center" });
+    }
+  }
+
+  function drawHUD() {
+    const bx = W - 224, by = 8, bw = 216, bh = 86;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+    drawText("TIME: " + fmtTime(time), bx + 10, by + 9, 2, "#000000");
+    drawText("DIST: " + fmtDist(dist), bx + 10, by + 28, 2, "#000000");
+    drawText("SPEED: " + String(Math.round(Math.cos(p.angle * 0.46) * p.speed / PX_PER_M)).padStart(2, "0") + "M/S", bx + 10, by + 47, 2, "#000000");
+    drawText("STYLE: " + style, bx + 10, by + 66, 2, "#000000");
+  }
+
+  function drawPrompt() {
+    if (state !== "ready") return;
+    if (Math.floor(blink * 2) % 2 === 0) {
+      drawText("PRESS ARROW KEYS OR WASD TO SKI", W / 2, H - 44, 2, "#0000a8", { align: "center" });
+    }
+    drawText("F = BOOST   SPACE = JUMP   F2 = RESTART", W / 2, H - 22, 1, "#404040", { align: "center" });
+  }
+
+  function drawWarning() {
+    if (warnTimer <= 0 || state === "gameover" || state === "eaten") return;
+    const label = "THE ABOMINABLE SNOWMAN!";
+    const tw = textWidth(label, 2);
+    const bx = Math.round(W / 2 - tw / 2) - 8;
+    const by = 98, bw = tw + 16, bh = 26;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+    drawText(label, W / 2, by + 6, 2, Math.floor(blink * 5) % 2 === 0 ? "#c81e1e" : "#000000", { align: "center" });
+  }
+
+  function drawChompText() {
+    if (state !== "eaten") return;
+    const f = Math.floor(eatenTimer / 0.18);
+    if (f < 4 && Math.floor(blink * 10) % 2 === 0) {
+      drawText("CHOMP!", p.x, PLAYER_Y - 116, 3, "#c81e1e", { align: "center", outline: "#000000" });
+    }
+  }
+
+  const PLAY_BTN = { x: W / 2 - 72, y: 292, w: 144, h: 28 };
+
+  function drawDialog() {
+    if (state !== "gameover") return;
+    const x = 118, y = 138, w = 404, h = 204;
+    // shadow-less hard bevel
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(x + 2, y + 2, w - 4, 2);
+    ctx.fillRect(x + 2, y + 2, 2, h - 4);
+    ctx.fillStyle = "#404040";
+    ctx.fillRect(x + 2, y + h - 4, w - 4, 2);
+    ctx.fillRect(x + w - 4, y + 2, 2, h - 4);
+    ctx.fillStyle = "#c0c0c0";
+    ctx.fillRect(x + 4, y + 4, w - 8, h - 8);
+
+    // title bar
+    ctx.fillStyle = "#000080";
+    ctx.fillRect(x + 6, y + 6, w - 12, 18);
+    drawText("SKIFREE", x + 12, y + 10, 1, "#ffffff");
+    ctx.fillStyle = "#c0c0c0";
+    ctx.fillRect(x + w - 26, y + 8, 16, 14);
+    ctx.strokeStyle = "#000000";
+    ctx.strokeRect(x + w - 26.5, y + 8.5, 15, 13);
+    drawText("X", x + w - 22, y + 11, 1, "#000000");
+
+    drawText("OUCH! THE ABOMINABLE SNOWMAN", x + w / 2, y + 40, 2, "#000000", { align: "center" });
+    drawText("ATE YOU.", x + w / 2, y + 60, 2, "#000000", { align: "center" });
+
+    drawText("DISTANCE " + Math.floor(dist) + " M", x + 54, y + 92, 2, "#000000");
+    drawText("STYLE    " + style, x + 54, y + 112, 2, "#000000");
+    drawText("TIME     " + fmtTime(time), x + 54, y + 132, 2, "#000000");
+
+    // button
+    const b = PLAY_BTN;
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(b.x - 1, b.y - 1, b.w + 2, b.h + 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.fillStyle = "#c0c0c0";
+    ctx.fillRect(b.x + 2, b.y + 2, b.w - 4, b.h - 4);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(b.x + 2, b.y + 2, b.w - 4, 2);
+    ctx.fillRect(b.x + 2, b.y + 2, 2, b.h - 4);
+    ctx.fillStyle = "#404040";
+    ctx.fillRect(b.x + 2, b.y + b.h - 4, b.w - 4, 2);
+    ctx.fillRect(b.x + b.w - 4, b.y + 2, 2, b.h - 4);
+    drawText("PLAY AGAIN", b.x + b.w / 2, b.y + 9, 2, "#000000", { align: "center" });
+
+    drawText("PRESS ENTER OR SPACE", x + w / 2, y + h - 18, 1, "#404040", { align: "center" });
+  }
+
+  function render() {
+    ctx.save();
+    if (shake > 0) {
+      const s = Math.ceil(shake * 6);
+      ctx.translate(Math.round(rand(-s, s)), Math.round(rand(-s, s)));
+    }
+    drawSnow();
+    drawMoguls();
+    drawTracks();
+    drawStartSlope();
+    for (let i = 0; i < obstacles.length; i++) drawObstacle(obstacles[i]);
+    drawYeti();
+    drawPlayer();
+    drawWarning();
+    drawChompText();
+    drawHUD();
+    drawPrompt();
+    drawDialog();
+    ctx.restore();
+  }
+
+  /* ---------- input ---------- */
+  const DIRS = {
+    ArrowLeft: "left", KeyA: "left",
+    ArrowRight: "right", KeyD: "right",
+    ArrowDown: "down", KeyS: "down",
+    ArrowUp: "up", KeyW: "up"
+  };
+
+  function onPress(code) {
+    Sound.init();
+    if (code === "F2" || code === "KeyR") { reset(); Sound.click(); return; }
+    if (code === "KeyM") { toggleMute(); return; }
+    if (code === "Enter" || code === "NumpadEnter") {
+      if (state === "ready") startGame();
+      else if (state === "gameover") { reset(); Sound.click(); }
+      return;
+    }
+    if (code === "Space") {
+      if (state === "ready") startGame();
+      else if (state === "gameover") { reset(); Sound.click(); }
+      else if (state === "skiing") jump();
+      return;
+    }
+    if (DIRS[code]) {
+      keys[DIRS[code]] = true;
+      if (state === "ready") startGame();
+      if (DIRS[code] === "left" || DIRS[code] === "right") stepAngle(DIRS[code] === "left" ? -1 : 1);
+      return;
+    }
+    if (code === "KeyF" || code === "ShiftLeft" || code === "ShiftRight") {
+      keys.boost = true;
+      if (state === "ready") startGame();
+    }
+  }
+
+  function onRelease(code) {
+    if (DIRS[code]) { keys[DIRS[code]] = false; return; }
+    if (code === "KeyF" || code === "ShiftLeft" || code === "ShiftRight") keys.boost = false;
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const code = e.code;
+    if (code === "Space" || code.indexOf("Arrow") === 0 || code === "F2") e.preventDefault();
+    if (e.repeat) {
+      if (DIRS[code] && (DIRS[code] === "left" || DIRS[code] === "right")) {
+        stepAngle(DIRS[code] === "left" ? -1 : 1);
+      }
+      return;
+    }
+    onPress(code);
+  });
+  window.addEventListener("keyup", function (e) { onRelease(e.code); });
+  window.addEventListener("blur", function () {
+    keys.left = keys.right = keys.down = keys.up = keys.boost = false;
+  });
+
+  cv.addEventListener("pointerdown", function (e) {
+    Sound.init();
+    const r = cv.getBoundingClientRect();
+    const x = (e.clientX - r.left) * (W / r.width);
+    const y = (e.clientY - r.top) * (H / r.height);
+    if (state === "ready") { startGame(); return; }
+    if (state === "gameover") {
+      const b = PLAY_BTN;
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { reset(); Sound.click(); }
+    }
+  });
+
+  /* ---------- chrome ---------- */
+  const btnMute = document.getElementById("btnMute");
+  function toggleMute() {
+    Sound.init();
+    const m = Sound.toggle();
+    btnMute.textContent = m ? "SND: OFF" : "SND: ON";
+    setBanner(m ? "SOUND MUTED" : "SOUND ON");
+  }
+  btnMute.addEventListener("click", function () { toggleMute(); btnMute.blur(); });
+
+  document.getElementById("btnMin").addEventListener("click", function () {
+    document.getElementById("win").classList.toggle("collapsed");
+    setBanner("WINDOW MINIMIZED (CLICK _ AGAIN)");
+    this.blur();
+  });
+  document.getElementById("btnMax").addEventListener("click", function () {
+    fit(); setBanner("ALREADY AS BIG AS IT GETS"); this.blur();
+  });
+  document.getElementById("btnClose").addEventListener("click", function () {
+    setBanner("THIS WINDOW CANNOT BE CLOSED. USE F2."); this.blur();
+  });
+
+  function fit() {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const chromeH = 92;
+    if (vw < 700) {
+      cv.style.width = "100%";
+      cv.style.height = "auto";
+      return;
+    }
+    const s = Math.max(1, Math.min(Math.floor((vw - 40) / W), Math.floor((vh - chromeH) / H)));
+    cv.style.width = (W * s) + "px";
+    cv.style.height = (H * s) + "px";
+  }
+  window.addEventListener("resize", fit);
+  fit();
+
+  /* ---------- main loop ---------- */
+  function frame(ts) {
+    if (!last) last = ts;
+    let dt = (ts - last) / 1000;
+    last = ts;
+    if (dt > 0.1) dt = 0.1;
+    if (!paused) {
+      acc += dt;
+      let guard = 0;
+      while (acc >= STEP && guard < 20) { update(STEP); acc -= STEP; guard++; }
+      if (guard >= 20) acc = 0;
+    }
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  reset();
+  requestAnimationFrame(frame);
+
+  /* ---------- debug / test API ---------- */
+  window.__SKIFREE__ = {
+    get stats() {
+      return {
+        state: state, dist: dist, style: style, speed: p.speed, x: p.x,
+        y: p.worldY, screenY: PLAYER_Y, angle: p.angle, time: time,
+        air: !!p.air, yetiActive: yeti.active, yetiY: yeti.y, yetiCaught: yeti.caught,
+        obstacles: obstacles.length, tracks: tracks.length, muted: Sound.isMuted(),
+        cameraY: cameraY, frames: Math.round(time * 120)
+      };
+    },
+    pause: function () { paused = true; },
+    resume: function () { paused = false; last = 0; acc = 0; },
+    advance: function (seconds) {
+      const n = Math.max(1, Math.round(seconds / STEP));
+      for (let i = 0; i < n; i++) update(STEP);
+      render();
+    },
+    restart: reset,
+    press: onPress,
+    release: onRelease,
+    setDistance: function (m) {
+      p.worldY = START_Y + m * PX_PER_M;
+      cameraY = p.worldY - PLAYER_Y;
+      dist = m;
+      spawnCursor = cameraY + H + 80;
+      obstacles = [];
+      tracks = [];
+      moguls = [];
+      generate();
+    },
+    setStyle: function (v) { style = v; },
+    setAngle: function (a) { p.angle = clamp(a, -2, 2); },
+    setX: function (x) { p.x = clamp(x, 22, W - 22); },
+    setInvuln: function (s) { p.invuln = Math.max(0, s); },
+    get obstacleList() {
+      return obstacles.map(function (o) {
+        return { type: o.type, x: o.x, screenY: o.y - cameraY };
+      });
+    },
+    spawnObstacle: function (type, dx, dy) {
+      const o = makeObstacle(type, p.x + (dx || 0), cameraY + PLAYER_Y + (dy || 0));
+      obstacles.push(o);
+      return o;
+    },
+    clearObstacles: function () { obstacles = []; },
+    jump: jump,
+    eatNow: function () { yeti.active = true; yeti.x = p.x; yeti.y = PLAYER_Y; yeti.caught = true; state = "eaten"; eatenTimer = 0; eatenFrame = -1; happyPlayed = false; },
+    mute: function () { const m = Sound.toggle(); btnMute.textContent = m ? "SND: OFF" : "SND: ON"; return m; },
+    PLAY_BTN: PLAY_BTN
+  };
+})();
+</script>
+</body>
+</html>
